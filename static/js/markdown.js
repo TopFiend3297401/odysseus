@@ -571,6 +571,23 @@ export function mdToHtml(src, opts) {
     /(^|[^\[(])#([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b/gi,
     '$1[#session-$2](#session-$2)',
   );
+  // Case D: Atlas note anchors (`#atlas-<url-encoded-path>`). Separate from the
+  // kinds above because vault paths carry '/', '.', and %-escapes. A weak model
+  // sometimes drops the bare anchor into prose instead of keeping the returned
+  // markdown link; upgrade it to a clean clickable link labelled with the note
+  // name (decoded basename, no extension) so the user never sees a raw
+  // `#atlas-…` token. Trailing sentence punctuation is left outside the link.
+  s = s.replace(
+    /(^|[^\[(])#(atlas-[A-Za-z0-9_%./-]+)/g,
+    (match, pre, anchor) => {
+      const trail = (anchor.match(/[.,;:!?]+$/) || [''])[0];
+      const core = trail ? anchor.slice(0, -trail.length) : anchor;
+      let label = core.slice('atlas-'.length);
+      try { label = decodeURIComponent(label); } catch (_) {}
+      label = label.split('/').pop().replace(/\.(md|markdown|base)$/i, '');
+      return `${pre}[${label}](#${core})${trail}`;
+    },
+  );
 
   // Convert markdown images before links so ![alt](url) does not become
   // literal "!" plus a normal link.
