@@ -1170,7 +1170,7 @@ document.addEventListener('click', function(e) {
     }
   } catch (_) {}
   if (!href.startsWith('#')) return;
-  let m = href.match(/^#(session|document|note|image|email|event|task|skill|research)-(.+)$/);
+  let m = href.match(/^#(session|document|note|image|email|event|task|skill|research|atlas)-(.+)$/);
   if (!m) {
     const noteOpen = href.match(/^#open=notes&note=([^&]+)/);
     if (noteOpen) m = ['note', 'note', decodeURIComponent(noteOpen[1])];
@@ -1244,6 +1244,13 @@ document.addEventListener('click', function(e) {
     import('./research/panel.js').then(mod => {
       const open = mod.openPanel || (mod.default && mod.default.openPanel);
       if (open) open(id);
+    }).catch(() => {});
+  } else if (kind === 'atlas') {
+    // Note path is URL-encoded in the link (paths carry '/'); decode then open
+    // the vault docked on the right with a highlight pulse.
+    import('./atlas.js').then(mod => {
+      const open = mod.openAtlasNote || (mod.default && mod.default.openAtlasNote);
+      if (open) open(decodeURIComponent(id));
     }).catch(() => {});
   }
 }, true);
