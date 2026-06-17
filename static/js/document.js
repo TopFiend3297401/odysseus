@@ -555,7 +555,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     const badge = document.getElementById('doc-version-badge');
 
     if (textarea) textarea.value = '';
-    if (textarea) textarea.placeholder = 'Start typing or paste text to create a document...';
+    if (textarea) textarea.placeholder = 'Start typing, or ask the AI in chat to write this document for you…';
     if (textarea) textarea.disabled = false;
     if (langSelect) langSelect.value = '';
     if (badge) badge.textContent = '';
@@ -10606,6 +10606,27 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     };
   }
 
+  /** Return the open doc's id, materializing an empty "Untitled" ghost into a
+   *  real doc first if needed.
+   *
+   *  The empty-state panel shows a ghost "Untitled" tab with NO persisted doc
+   *  (activeDocId is null), so chat send couldn't pass an active_doc_id — the
+   *  AI then never saw the doc the user had open and instead listed other
+   *  library docs and asked "which one?". Materializing on send gives it a real
+   *  id so "add a calculator to the untitled document" targets THIS doc. */
+  export async function ensureActiveDocId(sessionId) {
+    if (activeDocId) return activeDocId;
+    if (!isOpen) return null;               // no panel open → nothing to attach
+    try {
+      let sid = sessionId;
+      if (!sid && typeof _autoCreateSession === 'function') {
+        try { sid = await _autoCreateSession(); } catch (_) {}
+      }
+      await createDocument(sid);            // creates an empty doc + sets activeDocId
+    } catch (e) { console.error('ensureActiveDocId failed:', e); }
+    return activeDocId;
+  }
+
   /** Find an open email tab by source UID + folder. Returns docId or null. */
   export function findEmailDocId(uid, folder) {
     if (uid == null) return null;
@@ -10649,6 +10670,7 @@ const documentModule = {
   isDiffModeActive,
   getCurrentDocId,
   getActiveEmailComposerContext,
+  ensureActiveDocId,
   findEmailDocId,
   getSelectionContext,
   clearSelection,

@@ -1055,7 +1055,14 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
       fd.append('message', _finalMsgWithInject);
       fd.append('session', streamSessionId);
       if (ids.length) fd.append('attachments', JSON.stringify(ids));
-      // Auto-save & send active doc ID so the backend sees latest content
+      // Auto-save & send active doc ID so the backend sees latest content.
+      // If the panel is open on an empty "Untitled" ghost (no persisted doc),
+      // materialize it first so the AI actually receives the document the user
+      // is looking at — otherwise it can't see it and lists other library docs
+      // asking "which one?".
+      if (documentModule && !activeDocIdForSend && documentModule.isPanelOpen && documentModule.isPanelOpen() && documentModule.ensureActiveDocId) {
+        try { activeDocIdForSend = await documentModule.ensureActiveDocId(streamSessionId); } catch (_e) { /* best-effort */ }
+      }
       if (documentModule && activeDocIdForSend) {
         try { await documentModule.saveDocument({ silent: true }); } catch (_e) { /* best-effort */ }
         fd.append('active_doc_id', activeDocIdForSend);
