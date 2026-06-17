@@ -13863,6 +13863,86 @@ body:has(.doc-version-panel:not(.hidden)) .hamburger-btn {
 .doc-run-output .code-runner-loading { font-style: italic; color: var(--red); }
 .doc-run-output .code-runner-close { position: absolute; top: 4px; right: 4px; background: none; border: none; color: var(--fg); cursor: pointer; opacity: 0.5; font-size: 14px; padding: 2px 6px; }
 .doc-run-output .code-runner-close:hover { opacity: 1; }
+
+/* ===== Integrated run terminal (doc editor) ===== */
+.doc-terminal-pane {
+  flex: 0 0 auto;
+  height: 260px;
+  display: none;            /* JS sets flex when running */
+  flex-direction: column;
+  min-height: 120px;
+  border-top: 2px solid var(--hl-function, #61afef);
+  background: var(--hl-bg, var(--bg));
+  position: relative;
+}
+.doc-terminal-resize {
+  height: 6px;
+  cursor: ns-resize;
+  flex: 0 0 auto;
+  background: transparent;
+}
+.doc-terminal-resize:hover { background: color-mix(in srgb, var(--hl-function, #61afef) 35%, transparent); }
+.doc-terminal-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 8px;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.78em;
+  user-select: none;
+}
+.doc-terminal-title { font-weight: 600; opacity: 0.85; }
+.doc-terminal-status { font-size: 0.92em; opacity: 0.7; }
+.doc-terminal-status.ok { color: var(--hl-string, #98c379); opacity: 1; }
+.doc-terminal-status.err { color: var(--red); opacity: 1; }
+.doc-terminal-btn {
+  background: none;
+  border: none;
+  color: var(--fg);
+  cursor: pointer;
+  opacity: 0.55;
+  font-size: 13px;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 4px;
+}
+.doc-terminal-btn:hover { opacity: 1; background: color-mix(in srgb, var(--fg) 12%, transparent); }
+.doc-terminal-output {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 10px;
+  font-family: 'Fira Code', 'Courier New', monospace;
+  font-size: 0.84em;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--hl-fg, var(--fg));
+}
+.doc-terminal-input-echo { color: var(--hl-function, #61afef); opacity: 0.85; }
+.doc-terminal-exit { color: var(--hl-comment, #7f848e); font-style: italic; }
+.doc-terminal-inputrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  border-top: 1px solid var(--border);
+  padding: 4px 10px;
+}
+.doc-terminal-prompt { opacity: 0.6; font-family: 'Fira Code', 'Courier New', monospace; }
+.doc-terminal-input {
+  flex: 1 1 auto;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--fg);
+  font-family: 'Fira Code', 'Courier New', monospace;
+  font-size: 0.84em;
+  padding: 2px 0;
+}
+.doc-terminal-input:disabled { opacity: 0.4; }
+.doc-terminal-input::placeholder { opacity: 0.4; }
 .doc-run-pre { color: var(--fg); white-space: pre-wrap; word-break: break-word; margin: 0; }
 .doc-run-error { color: var(--red); white-space: pre-wrap; word-break: break-word; margin: 0; }
 

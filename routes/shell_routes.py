@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import uuid
 import tempfile
+import time
 from collections import namedtuple
 from pathlib import Path
 from typing import Dict, Any
@@ -406,6 +407,15 @@ class ShellExecRequest(BaseModel):
     use_tmux: bool = False  # run in tmux session (survives browser disconnect)
 
 
+class DocRunStartRequest(BaseModel):
+    code: str
+    lang: str = "python"  # python | bash
+
+
+class DocRunInputRequest(BaseModel):
+    data: str = ""  # one line of stdin (Enter is appended)
+
+
 async def _create_shell(command: str, **kwargs):
     """Spawn a shell subprocess for `command`.
 
@@ -715,6 +725,128 @@ async def _generate_tmux(cmd: str, request: Request):
         pass
 
 
+# ---------------------------------------------------------------------------
+# Interactive document run sessions (the doc editor's integrated terminal).
+#
+# Reuses the tmux pattern above: a script runs the user's code in a tmux
+# session (a real PTY, so input() works), tees output to a log we poll, and
+# appends the :::EXIT_CODE::: marker on exit. Input is delivered via
+# `tmux send-keys`. Line-based, POSIX-only (tmux). Admin-gated like the rest.
+# ---------------------------------------------------------------------------
+
+# Session ids are interpolated into shell/tmux commands, so they must be a
+# fixed, trusted shape — validate before EVERY use.
+DOCRUN_SID_RE = re.compile(r"^docrun-[0-9a-f]{8}$")
+DOCRUN_MAX = 5  # max concurrent doc-run sessions
+DOCRUN_TTL = 1800  # auto-reap sessions older than 30 min
+EXIT_MARKER = ":::EXIT_CODE:::"
+
+# sid -> created-at (epoch). Best-effort registry for cap + reap; the source of
+# truth for output/input/stop is the filesystem log + tmux itself (so it still
+# works even if this process didn't start the session).
+_DOCRUN_SESSIONS: Dict[str, float] = {}
+
+
+def _docrun_paths(sid: str):
+    return (
+        TMUX_LOG_DIR / f"{sid}.log",
+        TMUX_LOG_DIR / f"{sid}.sh",
+        TMUX_LOG_DIR / f"{sid}.code",
+    )
+
+
+async def _docrun_alive(sid: str) -> bool:
+    res = await _exec_shell(f"tmux has-session -t {sid} 2>/dev/null", timeout=5)
+    return res.get("exit_code") == 0
+
+
+async def _docrun_kill(sid: str) -> None:
+    """Graceful (C-c) then force (kill-session), then remove temp files."""
+    if not DOCRUN_SID_RE.match(sid):
+        return
+    await _exec_shell(
+        f"tmux send-keys -t {sid} C-c 2>/dev/null; sleep 0.3; "
+        f"tmux kill-session -t {sid} 2>/dev/null",
+        timeout=8,
+    )
+    for p in _docrun_paths(sid):
+        try:
+            p.unlink(missing_ok=True)
+        except Exception:
+            pass
+    _DOCRUN_SESSIONS.pop(sid, None)
+
+
+async def _docrun_reap() -> None:
+    now = time.time()
+    for sid in [s for s, t in list(_DOCRUN_SESSIONS.items()) if now - t > DOCRUN_TTL]:
+        await _docrun_kill(sid)
+
+
+def _read_docrun_output(sid: str, offset: int):
+    """Return (new_text, new_offset, exited, exit_code) from the session log.
+
+    `offset` is a character index into the cumulative log. The EXIT_CODE marker
+    (and anything after it) is stripped from the returned text and surfaced as
+    exited/exit_code instead.
+    """
+    log_path, _, _ = _docrun_paths(sid)
+    text = ""
+    if log_path.exists():
+        text = log_path.read_text(encoding="utf-8", errors="replace")
+    new_offset = len(text)
+    new = text[offset:] if offset <= len(text) else text
+    exited = False
+    exit_code = None
+    idx = new.find(EXIT_MARKER)
+    if idx != -1:
+        exited = True
+        after = new[idx + len(EXIT_MARKER):].strip().split()
+        try:
+            exit_code = int(after[0]) if after else -1
+        except ValueError:
+            exit_code = -1
+        new = new[:idx]
+    return new, new_offset, exited, exit_code
+
+
+async def _start_docrun(code: str, lang: str) -> str:
+    """Start a tmux session running `code`. Returns the session id."""
+    TMUX_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    await _docrun_reap()
+    if len(_DOCRUN_SESSIONS) >= DOCRUN_MAX:
+        # Make room: kill the oldest session.
+        oldest = min(_DOCRUN_SESSIONS, key=_DOCRUN_SESSIONS.get)
+        await _docrun_kill(oldest)
+
+    sid = f"docrun-{uuid.uuid4().hex[:8]}"
+    log_path, script_path, code_path = _docrun_paths(sid)
+    code_path.write_text(code, encoding="utf-8")
+    # `python3 -u` keeps stdout unbuffered so input() prompts appear immediately
+    # even though stdout is piped through tee (a non-tty, normally block-buffered).
+    interp = "python3 -u" if lang in ("python", "py") else "bash"
+    script_path.write_text(
+        "#!/bin/bash\n"
+        f"{interp} {shlex.quote(str(code_path))} 2>&1 | tee '{log_path}'\n"
+        "EC=${PIPESTATUS[0]}\n"
+        f"echo '{EXIT_MARKER}'$EC >> '{log_path}'\n"
+        f"rm -f '{code_path}' '{script_path}'\n"
+        "exit $EC\n",
+        encoding="utf-8",
+    )
+    script_path.chmod(0o755)
+
+    tmux_cmd = f"tmux new-session -d -s {sid} {shlex.quote(str(script_path))}"
+    res = await _exec_shell(tmux_cmd, timeout=10)
+    if res.get("exit_code") not in (0, None):
+        raise HTTPException(
+            500, f"Failed to start run session: {res.get('stderr', '').strip()}"
+        )
+    _DOCRUN_SESSIONS[sid] = time.time()
+    logger.info("doc run session started: %s lang=%s", sid, lang)
+    return sid
+
+
 async def _generate_win_detached(cmd: str, request: Request):
     """Windows stand-in for the tmux path (issues #84/#162).
 
@@ -827,6 +959,73 @@ def setup_shell_routes() -> APIRouter:
             cmd, timeout=req.timeout if req.timeout is not None else EXEC_TIMEOUT
         )
         return result
+
+    # ---- Interactive document run sessions (editor terminal) ----
+
+    @router.post("/api/shell/run-session")
+    async def run_session_start(request: Request, req: DocRunStartRequest):
+        """Start an interactive (tmux/PTY) run of `code`. Admin only."""
+        _require_admin(request)
+        if IS_WINDOWS:
+            raise HTTPException(
+                400, "Interactive run sessions require tmux (POSIX only)"
+            )
+        if not (req.code or "").strip():
+            raise HTTPException(400, "No code provided")
+        lang = (req.lang or "python").lower()
+        if lang not in ("python", "py", "bash", "sh", "shell"):
+            raise HTTPException(400, f"Unsupported language: {lang}")
+        sid = await _start_docrun(req.code, lang)
+        return {"session_id": sid}
+
+    @router.get("/api/shell/run-session/{sid}/output")
+    async def run_session_output(request: Request, sid: str, offset: int = 0):
+        """Return new output since `offset` for a run session. Admin only."""
+        _require_admin(request)
+        if not DOCRUN_SID_RE.match(sid):
+            raise HTTPException(400, "Bad session id")
+        await _docrun_reap()
+        data, new_offset, exited, exit_code = _read_docrun_output(sid, max(0, offset))
+        if exited:
+            alive = False
+            _DOCRUN_SESSIONS.pop(sid, None)
+        elif data:
+            alive = True  # it just produced output
+        else:
+            alive = await _docrun_alive(sid)
+        return {
+            "data": data,
+            "offset": new_offset,
+            "exited": exited,
+            "exit_code": exit_code,
+            "alive": alive,
+        }
+
+    @router.post("/api/shell/run-session/{sid}/input")
+    async def run_session_input(
+        request: Request, sid: str, req: DocRunInputRequest
+    ):
+        """Send one line of stdin to a run session (Enter appended). Admin only."""
+        _require_admin(request)
+        if not DOCRUN_SID_RE.match(sid):
+            raise HTTPException(400, "Bad session id")
+        # `-l --` sends the text literally (no key-name parsing, no leading-dash
+        # option confusion); Enter is sent as a separate key press.
+        await _exec_shell(
+            f"tmux send-keys -t {sid} -l -- {shlex.quote(req.data or '')}; "
+            f"tmux send-keys -t {sid} Enter",
+            timeout=8,
+        )
+        return {"ok": True}
+
+    @router.post("/api/shell/run-session/{sid}/stop")
+    async def run_session_stop(request: Request, sid: str):
+        """Kill a run session and clean up. Admin only."""
+        _require_admin(request)
+        if not DOCRUN_SID_RE.match(sid):
+            raise HTTPException(400, "Bad session id")
+        await _docrun_kill(sid)
+        return {"ok": True}
 
     @router.post("/api/shell/stream")
     async def shell_stream(request: Request, req: ShellExecRequest):

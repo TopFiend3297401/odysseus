@@ -11,6 +11,7 @@ import sessionModule from './sessions.js';
 import emojiPicker from './emojiPicker.js';
 import markdownModule from './markdown.js';
 import codeRunnerModule from './codeRunner.js';
+import docTerminal from './docTerminal.js';
 import { langIcon } from './langIcons.js';
 import spinnerModule from './spinner.js';
 import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js';
@@ -3555,6 +3556,11 @@ import * as Modals from './modalManager.js';
     // Save current doc state before switching
     saveCurrentToMap();
 
+    // A run-terminal session belongs to the doc that started it — tear it down
+    // when leaving that doc so we don't leave an orphan tmux session.
+    const _prevId = activeDocId;
+    if (_prevId && _prevId !== docId) { try { docTerminal.onDocClosed(); } catch (_) {} }
+
     // Auto-delete the doc we're leaving if it's completely empty
     const prevId = activeDocId;
     if (prevId && prevId !== docId && docs.has(prevId)) {
@@ -5844,6 +5850,8 @@ import * as Modals from './modalManager.js';
       return;
     }
     isOpen = false;
+    // Tear down any interactive run session so it doesn't outlive the editor.
+    try { docTerminal.onDocClosed(); } catch (_) {}
     // On touch, closing the doc should leave the keyboard DOWN. The tap blurs
     // the textarea (keyboard starts down), but a stray refocus during teardown
     // (the view behind regaining focus, etc.) was bouncing it back up. Blur any
@@ -7973,13 +7981,18 @@ import * as Modals from './modalManager.js';
       return;
     }
 
+    // python/bash run in the integrated interactive terminal (a real PTY), so
+    // scripts that call input() can be answered. The old one-shot output panel
+    // is only used as a fallback when the terminal can't start.
     if (lang === 'bash' || lang === 'sh' || lang === 'shell' || lang === 'zsh') {
-      codeRunnerModule.runServer(code, outputPanel, 'bash');
+      outputPanel.style.display = 'none';
+      docTerminal.run(code, 'bash');
       return;
     }
 
     if (lang === 'python' || lang === 'py') {
-      codeRunnerModule.runServer(code, outputPanel, 'python');
+      outputPanel.style.display = 'none';
+      docTerminal.run(code, 'python');
       return;
     }
 
