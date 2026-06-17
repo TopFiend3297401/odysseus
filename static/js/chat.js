@@ -1631,7 +1631,14 @@ import { wireArrowUpRecall, getUserMessagesFromChatHistory } from './composerArr
       if (selectedRouteForSend.endpoint_url) fd.append('selected_endpoint_url', selectedRouteForSend.endpoint_url);
       if (selectedRouteForSend.endpoint_id) fd.append('selected_endpoint_id', selectedRouteForSend.endpoint_id);
       if (ids.length) fd.append('attachments', JSON.stringify(ids));
-      // Auto-save & send active doc ID so the backend sees latest content
+      // Auto-save & send active doc ID so the backend sees latest content.
+      // If the panel is open on an empty "Untitled" ghost (no persisted doc),
+      // materialize it first so the AI actually receives the document the user
+      // is looking at — otherwise it can't see it and lists other library docs
+      // asking "which one?".
+      if (documentModule && !activeDocIdForSend && documentModule.isPanelOpen && documentModule.isPanelOpen() && documentModule.ensureActiveDocId) {
+        try { activeDocIdForSend = await documentModule.ensureActiveDocId(streamSessionId); } catch (_e) { /* best-effort */ }
+      }
       if (documentModule && activeDocIdForSend) {
         try {
           _sendPerf.mark('doc_silent_save_begin');
