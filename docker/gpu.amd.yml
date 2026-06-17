@@ -17,3 +17,46 @@ services:
     group_add:
       - video
       - ${RENDER_GID:-render}
+
+  # Local AMD-GPU image generation. Runs scripts/diffusion_server.py on a
+  # ROCm PyTorch base (the slim app image can't do GPU torch). Register it in
+  # Odysseus via Settings -> Add Models as an image endpoint with base_url
+  # http://diffusion:8100. Stop this service to reclaim its VRAM when idle.
+  diffusion:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.diffusion
+    # --allowed-host diffusion: the server default-denies non-localhost Host
+    # headers; the app reaches it as http://diffusion:8100 over the compose net.
+    command: >
+      python3 scripts/diffusion_server.py --model stabilityai/sdxl-turbo
+      --host 0.0.0.0 --port 8100 --dtype bfloat16 --steps 4
+      --allowed-host diffusion
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - video
+      - ${RENDER_GID:-render}
+    volumes:
+      # Run the repo's server (no image rebuild on edits) + share the model cache.
+      - ../scripts:/app/scripts:ro
+      - ${APP_DATA_DIR:-../data}/huggingface:/app/.cache/huggingface:z
+      # Persist MIOpen's compiled GPU kernels so the first generation after a
+      # restart isn't slow (~50 s of one-time kernel compilation otherwise).
+      - ${APP_DATA_DIR:-../data}/miopen:/root/.cache/miopen:z
+    environment:
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
+      # Use ONLY the 7900 XTX (GPU 0); hide the tiny integrated GPU so the fast
+      # attention backend stays enabled and the iGPU is never picked.
+      - HIP_VISIBLE_DEVICES=0
+      # gfx1100 (RX 7900 XTX) is natively supported by ROCm 6.4; uncomment only
+      # as a fallback if the GPU isn't detected on an older ROCm.
+      # - HSA_OVERRIDE_GFX_VERSION=11.0.0
+    # Host port 8101 (8100 is taken by chromadb). The app reaches the server
+    # over the docker network at http://diffusion:8100 regardless; this publish
+    # is only for direct host testing.
+    ports:
+      - "${DIFFUSION_BIND:-127.0.0.1}:${DIFFUSION_PORT:-8101}:8100"
+    restart: unless-stopped

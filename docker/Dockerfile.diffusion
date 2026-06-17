@@ -1,0 +1,29 @@
+# ROCm diffusion sidecar for local AMD GPU image generation.
+#
+# The main Odysseus image is python:3.14-slim (CPU-only, no torch). This image
+# is built on rocm/pytorch, which ships a ROCm-enabled PyTorch that runs on
+# AMD GPUs (gfx1100 / RX 7900 XTX is supported by ROCm 6.4). It runs Odysseus's
+# own scripts/diffusion_server.py (an OpenAI-images-compatible server).
+#
+# torch is ALREADY present (ROCm build) — do NOT add it to pip below, or pip
+# would pull a CPU wheel over it.
+FROM rocm/pytorch:rocm6.4.4_ubuntu24.04_py3.12_pytorch_release_2.7.1
+
+# Pinned, mutually-compatible diffusion stack. The earlier in-container attempt
+# failed with "'CLIPTextModel' object has no attribute 'text_model'" because the
+# very new huggingface_hub 1.x broke diffusers/transformers — so pin hub <1.0
+# alongside a matching diffusers/transformers pair.
+RUN pip install --no-cache-dir \
+    "diffusers==0.31.0" \
+    "transformers==4.46.3" \
+    "huggingface_hub==0.26.5" \
+    "accelerate==1.1.1" \
+    "fastapi" "uvicorn[standard]" "pillow" "safetensors" \
+    "sentencepiece" "protobuf"
+
+WORKDIR /app
+
+# The server is bind-mounted from ./scripts at runtime (see the compose
+# `diffusion` service) so edits don't require an image rebuild. The command +
+# model selection live in compose, not here.
+EXPOSE 8100
