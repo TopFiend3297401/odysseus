@@ -32,6 +32,7 @@ from .admin_tools import (
     do_manage_endpoints, do_manage_mcp, do_manage_webhooks,
     do_manage_tokens, do_manage_settings,
 )
+from .atlas_tools import ManageAtlasTool
 
 TOOL_HANDLERS = {
     "bash": BashTool().execute,
@@ -49,6 +50,7 @@ TOOL_HANDLERS = {
     "edit_document": EditDocumentTool().execute,
     "suggest_document": SuggestDocumentTool().execute,
     "manage_documents": ManageDocumentTool().execute,
+    "manage_atlas": ManageAtlasTool().execute,
     "get_workspace": GetWorkspaceTool().execute,
     "ask_user": AskUserTool().execute,
     "update_plan": UpdatePlanTool().execute,
@@ -86,7 +88,7 @@ TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_fi
              "suggest_document",
              "manage_endpoints", "manage_mcp", "manage_webhooks",
              "manage_tokens", "manage_documents", "manage_settings",
-             "manage_notes", "manage_calendar",
+             "manage_notes", "manage_calendar", "manage_atlas",
              "resolve_contact", "manage_contact",
              # Email tool names come from BUILTIN_EMAIL_TOOLS (unioned below)
              # so the fence regex, dispatch, and non-admin blocklist all cover
